@@ -22,4 +22,5 @@ go.work.sum
 .env
 
 tests/wildcard*
+tests/ca*
 cert2jks
