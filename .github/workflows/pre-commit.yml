@@ -15,7 +15,7 @@ jobs:
       # Make pip3 work
       - name: Install Dependencies apt
         run: |
-          apt update && \
+          apt-get update && \
           apt-get install -y python3 python3-pip python3-setuptools git wget python3-yaml python3-venv
 
       - uses: actions/checkout@v2
@@ -23,11 +23,11 @@ jobs:
       # Install requirements and latest ansible
       - name: Install Dependencies pip
         run: |
-          python3 -m venv env
+          python3 -m venv venv
           ./venv/bin/pip3 install pre-commit
 
       # Validate all files in the repo
       - name: Run pre-commit
         run: |
-          git config --global --add safe.directory /__w/cert2jks/cert2jks
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           ./venv/bin/pre-commit run --all-files -v || (cat /github/home/.cache/pre-commit/pre-commit.log && exit 1)
