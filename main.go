@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,6 +17,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 )
+
+var log *logrus.Logger
 
 type Cert struct {
 	Name     string `yaml:"Name"`
@@ -313,12 +314,10 @@ func runOnUpdate(command string) (string, error) {
 }
 
 // mainProcess is the core function that handles the main logic of the application
-func mainProcess(log *logrus.Logger, data map[string]interface{}, confFile *string) {
+func mainProcess(data map[string]interface{}, confFile *string) {
 	cfg, err := getFromVals(data)
 	if err != nil {
-		log.WithFields(logrus.Fields{
-			"event": "decoding",
-		}).Error("Decoding yaml configuration file ", *confFile, err)
+		log.WithError(err).Errorf("Decoding yaml configuration file %s", *confFile)
 		return
 	}
 
@@ -331,8 +330,8 @@ func mainProcess(log *logrus.Logger, data map[string]interface{}, confFile *stri
 
 		if !hasCertChanged(cert.Name, certPEM, keyPEM, caPEM, cfg.KeystorePath, cfg.KeystorePass) {
 			log.WithFields(logrus.Fields{
-				"event": "checking",
-				"cert":  cert.Name,
+				"cert": cert.Name,
+				"jks":  cfg.KeystorePath,
 			}).Info("Certificate has not changed, skipping.", cert.Name)
 			continue
 		}
@@ -340,9 +339,8 @@ func mainProcess(log *logrus.Logger, data map[string]interface{}, confFile *stri
 		err = addKeyToJKS(cert.Name, certPEM, keyPEM, caPEM, cfg.KeystorePath, cfg.KeystorePass)
 		if err != nil {
 			log.WithFields(logrus.Fields{
-				"event": "jks",
-				"cert":  cert.Name,
-				"jks":   cfg.KeystorePath,
+				"cert": cert.Name,
+				"jks":  cfg.KeystorePath,
 			}).Error("Creating jks file on ", cfg.KeystorePath, err)
 			return
 		}
@@ -350,20 +348,15 @@ func mainProcess(log *logrus.Logger, data map[string]interface{}, confFile *stri
 	}
 	if changed {
 		log.WithFields(logrus.Fields{
-			"event": "finalizing",
+			"jks": cfg.KeystorePath,
 		}).Info("Keystore updated, running OnUpdate command")
 		out, err := runOnUpdate(cfg.OnUpdate)
 		if err != nil {
-			log.WithFields(logrus.Fields{
-				"event": "onupdate",
-			}).Error("Running OnUpdate command ", cfg.OnUpdate, err)
+			log.WithError(err).Errorf("Running OnUpdate command %s", cfg.OnUpdate)
 			return
 		}
-		log.WithFields(logrus.Fields{
-			"event": "onupdate",
-		}).Info("OnUpdate command output: ", out)
+		log.Info("OnUpdate command output: ", out)
 	}
-
 }
 
 // main is the entry point of the application. It initializes the logger, parses command-line flags for configuration file path,
@@ -371,55 +364,57 @@ func mainProcess(log *logrus.Logger, data map[string]interface{}, confFile *stri
 // at the specified interval, logging relevant events and errors throughout the process.
 func main() {
 	// Create a new logger instance (optional, can use the package-level logger)
-	log := logrus.New()
-
-	// Set the output format (e.g., JSON)
-	log.SetFormatter(&logrus.JSONFormatter{})
-
-	// Set the log level
-	log.SetLevel(logrus.InfoLevel)
+	log = logrus.New()
 
 	confFile := flag.String("config", "tests/example.yaml", "Path to the configuration file")
 	daemonEnabled := flag.Bool("daemon", false, "Run as a systemd daemon")
 	daemonInterval := flag.Duration("interval", 3600*time.Second, "Interval in seconds for the daemon to check for changes")
+	logFormat := flag.String("log-format", "json", "Log format (json or text)")
+	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error, fatal, panic)")
 	flag.Parse()
+
+	// Set the output format (e.g., JSON)
+	if *logFormat == "json" {
+		log.SetFormatter(&logrus.JSONFormatter{})
+	} else {
+		log.SetFormatter(&logrus.TextFormatter{})
+	}
+
+	// Set the log level
+	// Set the log level based on user input
+	level, err := logrus.ParseLevel(*logLevel)
+	if err != nil {
+		log.WithError(err).Errorf("Invalid log level '%s' provided. Defaulting to 'info'.", *logLevel)
+		log.SetLevel(logrus.InfoLevel)
+	} else {
+		log.SetLevel(level)
+	}
+
 	if *confFile == "" {
-		log.WithFields(logrus.Fields{
-			"event": "flags",
-		}).Error("Please provide a configuration file with -config flag")
+		log.Error("Please provide a configuration file with -config flag")
 		return
 	}
 
-	// Log messages with fields
-	log.WithFields(logrus.Fields{
-		"event": "starting",
-	}).Info("Reading configuration file ", *confFile)
-
+	log.Debug("Reading configuration file ", *confFile)
 	data, err := readConfigFile(*confFile)
 	if err != nil {
-		log.WithFields(logrus.Fields{
-			"event": "starting",
-		}).Error("Reading configuration file ", *confFile, err)
+		log.WithError(err).Errorf("Reading configuration file %s", *confFile)
 		return
 	}
 
 	if !*daemonEnabled {
-		mainProcess(log, data, confFile)
+		mainProcess(data, confFile)
 	} else {
-		log.WithFields(logrus.Fields{
-			"event": "daemon",
-		}).Info("Running as daemon with an interval of ", *daemonInterval)
+		log.Info("Running as daemon with an interval of ", *daemonInterval)
 		for {
-			mainProcess(log, data, confFile)
+			mainProcess(data, confFile)
 
 			// Calculate the next check time
 			startTime := time.Now()
 			futureTime := startTime.Add(*daemonInterval)
 			formattedTime := futureTime.Format("02/01/2006 15:04")
 
-			log.WithFields(logrus.Fields{
-				"event": "daemon",
-			}).Info("The next check will be at ", formattedTime)
+			log.Info("The next check will be at ", formattedTime)
 			time.Sleep(*daemonInterval * time.Second)
 		}
 	}
