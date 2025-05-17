@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"reflect"
 	"strings"
 	"time"
 
@@ -32,34 +31,6 @@ type Config struct {
 	KeystorePass string `yaml:"KeystorePassword"`
 	Certs        []Cert `yaml:"Certs"`
 	OnUpdate     string `yaml:"OnUpdate,omitempty"`
-}
-
-func structToMap(obj interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
-
-	val := reflect.ValueOf(obj)
-
-	if val.Kind() == reflect.Ptr {
-		val = val.Elem()
-	}
-
-	typ := val.Type()
-
-	for i := 0; i < val.NumField(); i++ {
-		fieldName := typ.Field(i).Name
-		fieldValueKind := val.Field(i).Kind()
-		var fieldValue interface{}
-
-		if fieldValueKind == reflect.Struct {
-			fieldValue = structToMap(val.Field(i).Interface())
-		} else {
-			fieldValue = val.Field(i).Interface()
-		}
-
-		result[fieldName] = fieldValue
-	}
-
-	return result
 }
 
 func readConfigFile(configFile string) (map[string]interface{}, error) {
@@ -274,6 +245,7 @@ func addKeyToJKS(name string, certPEM []byte, keyPEM []byte, caPEM []byte, jksPa
 	return nil
 }
 
+// hasCertChanged checks if the certificate or key are different from the ones in the keystore
 func hasCertChanged(name string, certPEM []byte, keyPEM []byte, caPEM []byte, jksPath string, jksPassword string) bool {
 	if _, err := os.Stat(jksPath); err != nil {
 		if os.IsNotExist(err) {
@@ -326,6 +298,7 @@ func runOnUpdate(command string) (string, error) {
 		return "", nil
 	}
 
+	// FIXME: let the user choose the shell
 	cmd := exec.Command("bash", "-c", command)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -339,6 +312,7 @@ func runOnUpdate(command string) (string, error) {
 	return out.String(), nil
 }
 
+// mainProcess is the core function that handles the main logic of the application
 func mainProcess(log *logrus.Logger, data map[string]interface{}, confFile *string) {
 	cfg, err := getFromVals(data)
 	if err != nil {
@@ -438,11 +412,11 @@ func main() {
 		for {
 			mainProcess(log, data, confFile)
 
+			// Calculate the next check time
 			startTime := time.Now()
-
-			// 3. Add the duration to the starting time to get a future time.Time
 			futureTime := startTime.Add(*daemonInterval)
 			formattedTime := futureTime.Format("02/01/2006 15:04")
+
 			log.WithFields(logrus.Fields{
 				"event": "daemon",
 			}).Info("The next check will be at ", formattedTime)
