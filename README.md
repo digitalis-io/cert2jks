@@ -49,6 +49,18 @@ go build -o cert2jks main.go
 ./cert2jks -config path/to/config.yaml [-daemon]
 ```
 
+### Options
+
+```sh
+Usage of cert2jks
+  -config string
+    	Path to the configuration file (default "tests/example.yaml")
+  -daemon
+    	Run as a systemd daemon
+  -interval duration
+    	Interval in seconds for the daemon to check for changes (default 1h0m0s)
+```
+
 ## How it works
 
 * Reads the configuration file and renders it with vals if needed.
