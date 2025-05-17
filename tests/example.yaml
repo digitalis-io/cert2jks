@@ -1,0 +1,14 @@
+KeystorePath: /tmp/keystore.jks
+KeystorePassword: changeit
+OnUpdate: |
+  echo 'Keystore updated!' > /tmp/keystore-update.log
+  echo 'Restarting service...' >> /tmp/keystore-update.log
+Certs:
+  - Name: key1
+    Cert: tests/wildcard.crt
+    Key: tests/wildcard.key
+    CA: tests/ca.crt
+  - Name: key2
+    Cert: ref+vault://secret/cert#crt
+    Key: ref+vault://secret/cert#key
+    CA: ref+vault://secret/cert#ca
