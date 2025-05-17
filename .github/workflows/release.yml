@@ -1,12 +1,46 @@
-name: Build and Release
-
+name: Release and build
 on:
   push:
-    branches:
-      - github
+    tags:
+      - 'v*'
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fail if tag is not prefixed by v
+        run: |
+          if [[ $GITHUB_REF_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9].* ]]; then
+              echo "Valid version format"
+          else
+              echo "Invalid version format"
+              exit 1
+          fi
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+        run: |
+          OPTIONS=""
+          if [[ $GITHUB_REF_NAME == *"internal"* ]]; then
+            OPTIONS="--prerelease"
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+              --repo="$GITHUB_REPOSITORY" \
+              --title="Release for ${GITHUB_REF_NAME}" \
+              --generate-notes $OPTIONS
+
   build:
+    needs: [release]
     runs-on: ubuntu-latest
 
     strategy:
@@ -38,7 +72,8 @@ jobs:
       - name: Build
         env:
           GOARCH: ${{ matrix.goarch }}
-        run: go build -v -o cert2jks-${{ matrix.goarch }} main.go
+        #run: go build -ldflags "-linkmode 'external' -extldflags '-static'" -v -o cert2jks-${{ matrix.goarch }} main.go
+        run: go build -o cert2jks-${{ matrix.goarch }} main.go
 
       - name: Archive build output
         uses: actions/upload-artifact@v4
