@@ -49,6 +49,12 @@ go build -o cert2jks main.go
 ./cert2jks -config path/to/config.yaml [-daemon]
 ```
 
+You can run this command for example:
+
+- Using a cronjob: create a cronjob for example on `/etc/cron.daily/cert2js`
+- Using systemd service
+- Manually
+
 ### Options
 
 ```sh
