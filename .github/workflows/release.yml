@@ -73,10 +73,15 @@ jobs:
         env:
           GOARCH: ${{ matrix.goarch }}
         #run: go build -ldflags "-linkmode 'external' -extldflags '-static'" -v -o cert2jks-${{ matrix.goarch }} main.go
-        run: go build -o cert2jks-${{ matrix.goarch }} main.go
+        run: |
+          mkdir -p dist
+          go build -o dist/cert2jks-${{ matrix.goarch }} main.go
+          sha256sum dist/cert2jks-${{ matrix.goarch }} > dist/cert2jks-${{ matrix.goarch }}.sha256sum
 
-      - name: Archive build output
-        uses: actions/upload-artifact@v4
+      - name: Upload Artifacts
+        uses: softprops/action-gh-release@v2
         with:
-          name: cert2jks-${{ matrix.goarch }}
-          path: cert2jks-${{ matrix.goarch }}
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
