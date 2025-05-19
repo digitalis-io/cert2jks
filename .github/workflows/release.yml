@@ -10,6 +10,7 @@ defaults:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
