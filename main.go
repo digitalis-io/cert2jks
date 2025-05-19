@@ -368,7 +368,7 @@ func main() {
 
 	confFile := flag.String("config", "tests/example.yaml", "Path to the configuration file")
 	daemonEnabled := flag.Bool("daemon", false, "Run as a systemd daemon")
-	daemonInterval := flag.Duration("interval", 3600*time.Second, "Interval in seconds for the daemon to check for changes")
+	daemonInterval := flag.Duration("interval", 43200*time.Second, "Interval in seconds for the daemon to check for changes")
 	logFormat := flag.String("log-format", "json", "Log format (json or text)")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error, fatal, panic)")
 	flag.Parse()

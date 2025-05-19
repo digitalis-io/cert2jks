@@ -1,0 +1,15 @@
+[Unit]
+Description=Certificate to JKS Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cert2jks -config /usr/local/etc/config.yaml -daemon
+Restart=always
+RestartSec=5
+# Change to a restricted user if you can such as `cassandra`, `kafka`, etc using a service override
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

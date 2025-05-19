@@ -41,18 +41,32 @@ Certs:
     * Key: Path to the private key file (or inline PEM).
     * CA: (Optional) Path to the CA certificate file (or inline PEM).
 
+The whole configuration is parsed through [helmfile/vals](https://github.com/helmfile/vals?tab=readme-ov-file#supported-backends) which means you can add
+entries to any suported encrypted backend for any field. The complex example below combines three different encrypted storages
+to obtain the `KeystorePassword` from AWS, the script to run from `S3` and the certs from `Hashicorp Vault`:
+
+```yaml
+KeystorePath: /opt/myApp/keystore.jks
+KeystorePassword: ref+awssecrets://PATH/TO/SECRET[?region=REGION&role_arn=ASSUMED_ROLE_ARN]#/KeystorePassword
+OnUpdate: ref+s3://BUCKET/KEY/OF/OBJECT[?region=REGION&profile=AWS_PROFILE&role_arn=ASSUMED_ROLE_ARN&version_id=ID]
+Certs:
+  - Name: key1
+    Cert: ref+vault://secret/cert#crt
+    Key: ref+vault://secret/cert#key
+    CA: ref+vault://secret/cert#ca
+```
 
 ## Usage
 
 ```sh
-go build -o cert2jks main.go
-./cert2jks -config path/to/config.yaml [-daemon]
+make
+./dist/cert2jks -config path/to/config.yaml [-daemon]
 ```
 
 You can run this command for example:
 
 - Using a cronjob: create a cronjob for example on `/etc/cron.daily/cert2js`
-- Using systemd service
+- Using systemd a [service](./resources/cert2jks.service)
 - Manually
 
 ### Options
@@ -64,7 +78,7 @@ Usage of cert2jks
   -daemon
     	Run as a systemd daemon
   -interval duration
-    	Interval in seconds for the daemon to check for changes (default 1h0m0s)
+    	Interval in seconds for the daemon to check for changes (default 12h0m0s)
 ```
 
 ## How it works
