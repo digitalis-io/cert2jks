@@ -44,11 +44,17 @@ jobs:
 
   build:
     needs: [release]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     strategy:
       matrix:
-        goarch: [amd64, arm64]
+        include:
+        - name: Build amd64
+          os: [ubuntu-22.04]
+          goarch: [amd64]
+        - name: Build arm64
+          os: [ubuntu-22.04-arm]
+          goarch: [arm64]
 
     steps:
       - name: Checkout code
@@ -78,7 +84,7 @@ jobs:
         #run: go build -ldflags "-linkmode 'external' -extldflags '-static'" -v -o cert2jks-${{ matrix.goarch }} main.go
         run: |
           mkdir -p dist
-          make BINARY_NAME=cert2jks-${{ matrix.goarch }} build
+          make STATIC=1 CGO_ENABLED=1 BINARY_NAME=cert2jks-${{ matrix.goarch }} build
           sha256sum dist/cert2jks-${{ matrix.goarch }} > dist/cert2jks-${{ matrix.goarch }}.sha256sum
 
       - name: Upload Artifacts
