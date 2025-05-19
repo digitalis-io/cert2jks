@@ -359,6 +359,14 @@ func mainProcess(data map[string]interface{}, confFile *string) {
 	}
 }
 
+func getenvOrDefault(envKey, defaultVal string) string {
+	val := os.Getenv(envKey)
+	if val != "" {
+		return val
+	}
+	return defaultVal
+}
+
 // main is the entry point of the application. It initializes the logger, parses command-line flags for configuration file path,
 // daemon mode, and interval. It reads the configuration file and either runs the main process once or repeatedly as a daemon
 // at the specified interval, logging relevant events and errors throughout the process.
@@ -366,11 +374,19 @@ func main() {
 	// Create a new logger instance (optional, can use the package-level logger)
 	log = logrus.New()
 
-	confFile := flag.String("config", "tests/example.yaml", "Path to the configuration file")
-	daemonEnabled := flag.Bool("daemon", false, "Run as a systemd daemon")
-	daemonInterval := flag.Duration("interval", 43200*time.Second, "Interval in seconds for the daemon to check for changes")
-	logFormat := flag.String("log-format", "json", "Log format (json or text)")
-	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error, fatal, panic)")
+	confFile := flag.String("config", getenvOrDefault("CERT2JKS_CONFIG", "tests/example.yaml"), "Path to the configuration file - env: CERT2JKS_CONFIG")
+	daemonEnabled := flag.Bool("daemon", getenvOrDefault("CERT2JKS_DAEMON", "false") == "true", "Run as a systemd daemon - env: CERT2JKS_DAEMON")
+	daemonInterval := flag.Duration("interval", func() time.Duration {
+		env := os.Getenv("CERT2JKS_INTERVAL")
+		if env != "" {
+			if d, err := time.ParseDuration(env); err == nil {
+				return d
+			}
+		}
+		return 43200 * time.Second
+	}(), "Interval for the daemon to check for changes (e.g. 12h, 3600s) - env: CERT2JKS_INTERVAL")
+	logFormat := flag.String("log-format", getenvOrDefault("CERT2JKS_LOG_FORMAT", "json"), "Log format (json or text) - env: CERT2JKS_LOG_FORMAT")
+	logLevel := flag.String("log-level", getenvOrDefault("CERT2JKS_LOG_LEVEL", "info"), "Log level (debug, info, warn, error, fatal, panic) - env: CERT2JKS_LOG_LEVEL")
 	flag.Parse()
 
 	// Set the output format (e.g., JSON)

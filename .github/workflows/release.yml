@@ -78,8 +78,7 @@ jobs:
         #run: go build -ldflags "-linkmode 'external' -extldflags '-static'" -v -o cert2jks-${{ matrix.goarch }} main.go
         run: |
           mkdir -p dist
-          #go build -o dist/cert2jks-${{ matrix.goarch }} main.go
-          make BINARY_NAME=cert2jks-${{ matrix.goarch }} build
+          make STATIC=1 CGO_ENABLED=1 BINARY_NAME=cert2jks-${{ matrix.goarch }} build
           sha256sum dist/cert2jks-${{ matrix.goarch }} > dist/cert2jks-${{ matrix.goarch }}.sha256sum
 
       - name: Upload Artifacts

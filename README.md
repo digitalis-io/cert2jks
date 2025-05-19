@@ -43,7 +43,8 @@ Certs:
 
 The whole configuration is parsed through [helmfile/vals](https://github.com/helmfile/vals?tab=readme-ov-file#supported-backends) which means you can add
 entries to any suported encrypted backend for any field. The complex example below combines three different encrypted storages
-to obtain the `KeystorePassword` from AWS, the script to run from `S3` and the certs from `Hashicorp Vault`:
+to obtain the `KeystorePassword` from [AWS](https://aws.amazon.com/secrets-manager/),
+the script to run from [S3](https://aws.amazon.com/s3/) and the certs from [Hashicorp Vault](https://developer.hashicorp.com/vault):
 
 ```yaml
 KeystorePath: /opt/myApp/keystore.jks
@@ -69,6 +70,12 @@ You can run this command for example:
 - Using systemd a [service](./resources/cert2jks.service)
 - Manually
 
+### Docker
+
+```sh
+docker run -d --name cert2jks -v /config.yaml:/app/config.yaml ghcr.io/digitalis-io/cert2jks:latest
+```
+
 ### Options
 
 ```sh
@@ -79,6 +86,10 @@ Usage of cert2jks
     	Run as a systemd daemon
   -interval duration
     	Interval in seconds for the daemon to check for changes (default 12h0m0s)
+  -log-format string
+        Log format (json or text) (default "json")
+  -log-level string
+        Log level (debug, info, warn, error, fatal, panic) (default "info")
 ```
 
 ## How it works
