@@ -3,7 +3,7 @@ FROM golang:1.24-alpine AS builder
 WORKDIR /app
 COPY . .
 
-RUN make
+RUN go build -o cert2jks main.go
 
 # ---
 
