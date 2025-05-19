@@ -1,4 +1,5 @@
 BINARY_NAME=cert2jks
+CGO_ENABLED=1
 
 build:
 	@mkdir -p dist
@@ -12,3 +13,4 @@ clean:
 	@rm -f dist/$(BINARY_NAME)
 
 .PHONY: build clean
+.EXPORT_ALL_VARIABLES:
