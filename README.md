@@ -1,6 +1,8 @@
 # cert2jks
 
-`cert2jks` is a Go utility that reads certificates, private keys, and CA certificates from files (or inline PEM), and generates or updates a Java KeyStore (JKS) file. It supports configuration via YAML, can run as a daemon to periodically check for certificate changes, and can execute a custom command when the keystore is updated.
+`cert2jks` is a Go utility that reads certificates, private keys, and CA certificates from files (or inline PEM), and generates or updates a Java KeyStore (JKS) file. It supports configuration via YAML, can run as a daemon to periodically check for certificate changes, and can execute a custom command when the keystore is updated. This utility is designed for developers and system administrators who need to manage certificates efficiently.
+
+The certificates can be stored to any secrets management backend supported by [helmfile/vals](https://github.com/helmfile/vals?tab=readme-ov-file#supported-backends). See examples below.
 
 ## Features
 
@@ -10,10 +12,11 @@
 - Supports running as a daemon to periodically check for changes.
 - Executes a user-defined command after updating the keystore (e.g., to reload a service).
 - Supports configuration templating and secrets management with [helmfile/vals](https://github.com/helmfile/vals).
+- Provides detailed usage examples and troubleshooting tips for common issues.
 
 ## Configuration
 
-Configuration is provided via a YAML file. Example:
+Configuration is provided via a YAML file. Ensure proper YAML syntax and indentation. Example:
 
 ```yaml
 KeystorePath: keystore.jks
@@ -66,8 +69,8 @@ make
 
 You can run this command for example:
 
-- Using a cronjob: create a cronjob for example on `/etc/cron.daily/cert2js`
-- Using systemd a [service](./resources/cert2jks.service)
+- Using a cronjob: create a cronjob for example on `/etc/cron.daily/cert2jks`
+- Using systemd as a [service](./resources/cert2jks.service)
 - Manually
 
 ### Docker
@@ -75,6 +78,7 @@ You can run this command for example:
 ```sh
 docker run -d --name cert2jks -v /config.yaml:/app/config.yaml ghcr.io/digitalis-io/cert2jks:latest
 ```
+This command mounts the configuration file into the container, allowing the application to access it.
 
 ### Options
 
@@ -103,7 +107,7 @@ Usage of cert2jks
 
 ## Dependencies
 
-- github.com/pavlo-v-chernykh/keystore-go/v4
-- github.com/helmfile/vals
-- github.com/sirupsen/logrus
-- gopkg.in/yaml.v3
+- github.com/pavlo-v-chernykh/keystore-go/v4: Library for managing Java KeyStores.
+- github.com/helmfile/vals: Library for configuration templating and secrets management.
+- github.com/sirupsen/logrus: Structured logger for Go.
+- gopkg.in/yaml.v3: YAML support for Go.
