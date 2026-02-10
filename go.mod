@@ -1,8 +1,8 @@
 module github.com/digitalis-io/cert2jks
 
-go 1.24.2
+go 1.25.0
 
-toolchain go1.24.3
+toolchain go1.25.6
 
 require (
 	github.com/helmfile/vals v0.41.0
