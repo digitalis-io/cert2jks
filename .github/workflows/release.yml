@@ -8,6 +8,10 @@ defaults:
   run:
     shell: bash
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   packages: write
@@ -30,33 +34,29 @@ jobs:
           fi
 
       - name: Create release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            Automated release for tag ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'internal') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
-        run: |
-          OPTIONS=""
-          if [[ $GITHUB_REF_NAME == *"internal"* ]]; then
-            OPTIONS="--prerelease"
-          fi
-          gh release create "$GITHUB_REF_NAME" \
-              --repo="$GITHUB_REPOSITORY" \
-              --title="Release for ${GITHUB_REF_NAME}" \
-              --generate-notes $OPTIONS
 
   build:
     needs: [release]
-    runs-on: ${{ matrix.os }}
-
     strategy:
       matrix:
         include:
-        - name: Build amd64
-          os: [ubuntu-22.04]
-          goarch: amd64
-        - name: Build arm64
-          os: [ubuntu-22.04-arm]
-          goarch: arm64
-
+          - name: Build amd64
+            os: ubuntu-22.04
+            goarch: amd64
+          - name: Build arm64
+            os: ubuntu-22.04
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -87,50 +87,39 @@ jobs:
           make STATIC=1 CGO_ENABLED=1 BINARY_NAME=cert2jks-${{ matrix.goarch }} build
           sha256sum dist/cert2jks-${{ matrix.goarch }} > dist/cert2jks-${{ matrix.goarch }}.sha256sum
 
-      - name: Upload Artifacts
-        uses: softprops/action-gh-release@v2
+      - name: Upload artifacts for release
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            dist/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: cert2jks-${{ matrix.goarch }}
+          path: dist/*
 
-      - name: Get TAG
-        if: ${{ matrix.goarch == 'amd64' }}
-        id: get_tag
-        run: echo TAG=${GITHUB_REF##*/} >> $GITHUB_ENV
+  docker:
+    needs: [release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Get Repo Owner
-        if: ${{ matrix.goarch == 'amd64' }}
-        id: get_repo_owner
-        run: echo "REPO_OWNER=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" > $GITHUB_ENV
+      - name: Set tag and repo owner
+        id: vars
+        run: |
+          echo "TAG=${GITHUB_REF##*/}" >> $GITHUB_ENV
+          echo "REPO_OWNER=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - name: Set up QEMU
-        if: ${{ matrix.goarch == 'amd64' }}
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        if: ${{ matrix.goarch == 'amd64' }}
+      - name: Set up QEMU and Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: "Get docker info"
-        if: ${{ matrix.goarch == 'amd64' }}
-        run: |
-          echo "Actor: ${{ github.actor }}"
-
-      - name: "Log into GitHub Container Registry"
-        if: ${{ matrix.goarch == 'amd64' }}
-        uses: "docker/login-action@v1"
+      - name: Log into GitHub Container Registry
+        uses: docker/login-action@v2
         with:
-          registry: "ghcr.io"
-          username: "${{ github.actor }}"
-          password: "${{ secrets.GITHUB_TOKEN }}"
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push multi-arch images
         uses: docker/build-push-action@v4
-        if: ${{ matrix.goarch == 'amd64' }}
         with:
-          platforms: linux/amd64,linux/arm/v6,linux/arm64
+          platforms: linux/amd64,linux/arm64
           build-args: |
             VERSION=${{ env.TAG }}
             GitCommit=${{ github.sha }}
@@ -141,4 +130,4 @@ jobs:
             ghcr.io/${{ env.REPO_OWNER }}/cert2jks:${{ env.TAG }}
             ghcr.io/${{ env.REPO_OWNER }}/cert2jks:latest
           labels: |
-            LABEL org.opencontainers.image.source="https://github.com/${{ env.REPO_OWNER }}/cert2jks"
+            org.opencontainers.image.source=https://github.com/${{ env.REPO_OWNER }}/cert2jks
