@@ -211,7 +211,7 @@ func addKeyToJKS(name string, certPEM []byte, keyPEM []byte, caPEM []byte, jksPa
 
 	// Read and parse the CA certificate if provided
 	var caCert *x509.Certificate
-	if len(caPEM) < 1 {
+	if len(caPEM) > 0 {
 		caBlock, _ := pem.Decode(caPEM)
 		if caBlock == nil || caBlock.Type != "CERTIFICATE" {
 			return errors.New("failed to decode CA certificate")
@@ -254,7 +254,7 @@ func hasCertChanged(name string, certPEM []byte, keyPEM []byte, caPEM []byte, jk
 		}
 	}
 
-	ks, err := readKeyStore(jksPath, []byte("changeit"))
+	ks, err := readKeyStore(jksPath, []byte(jksPassword))
 	if err != nil {
 		return true
 	}
@@ -325,7 +325,8 @@ func mainProcess(data map[string]interface{}, confFile *string) {
 	for _, cert := range cfg.Certs {
 		certPEM, keyPEM, caPEM, err := readCertsFromFile(cert.CertPath, cert.KeyPath, cert.CaPath)
 		if err != nil {
-			panic(err)
+			log.WithError(err).WithField("cert", cert.Name).Error("Failed to read certificate files")
+			continue
 		}
 
 		if !hasCertChanged(cert.Name, certPEM, keyPEM, caPEM, cfg.KeystorePath, cfg.KeystorePass) {
@@ -431,7 +432,7 @@ func main() {
 			formattedTime := futureTime.Format("02/01/2006 15:04")
 
 			log.Info("The next check will be at ", formattedTime)
-			time.Sleep(*daemonInterval * time.Second)
+			time.Sleep(*daemonInterval)
 		}
 	}
 }
