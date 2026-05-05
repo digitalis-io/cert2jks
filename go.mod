@@ -1,6 +1,6 @@
 module github.com/digitalis-io/cert2jks
 
-go 1.26.0
+go 1.26.2
 
 require (
 	github.com/helmfile/vals v0.44.0
@@ -25,7 +25,7 @@ require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/1Password/connect-sdk-go v1.5.3 // indirect
-	github.com/1password/onepassword-sdk-go v0.4.0 // indirect
+	github.com/1password/onepassword-sdk-go v0.3.1 // indirect
 	github.com/AlecAivazis/survey/v2 v2.3.7 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1 // indirect
