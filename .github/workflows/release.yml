@@ -63,3 +63,56 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_OWNER: ${{ env.REPO_OWNER }}
+
+  darwin:
+    name: Darwin Build
+    needs: goreleaser
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build darwin binaries
+        env:
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          VER="${VERSION#v}"
+          LDFLAGS="-s -w -X main.version=${VER} -X main.commit=${COMMIT} -X main.date=${DATE}"
+          mkdir -p dist
+
+          build_one() {
+            local arch="$1" archname="$2" cc_arch="$3"
+            local outdir="dist/cert2jks_${VER}_Darwin_${archname}"
+            mkdir -p "${outdir}"
+            CGO_ENABLED=1 GOOS=darwin GOARCH="${arch}" \
+              CC="clang -arch ${cc_arch}" CXX="clang++ -arch ${cc_arch}" \
+              go build -trimpath -ldflags "${LDFLAGS}" -o "${outdir}/cert2jks" ./main.go
+            cp README.md "${outdir}/"
+            cp LICENSE* "${outdir}/" 2>/dev/null || true
+            cp -R resources "${outdir}/"
+            tar -C dist -czf "${outdir}.tar.gz" "$(basename "${outdir}")"
+          }
+
+          build_one amd64 x86_64 x86_64
+          build_one arm64 arm64  arm64
+
+          ( cd dist && shasum -a 256 *.tar.gz > darwin_checksums.txt )
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/cert2jks_*_Darwin_*.tar.gz \
+            dist/darwin_checksums.txt \
+            --clobber
