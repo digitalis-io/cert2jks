@@ -1,0 +1,10 @@
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -S cert2jks && adduser -S -G cert2jks cert2jks
+
+WORKDIR /app
+COPY cert2jks /app/cert2jks
+
+USER cert2jks
+ENTRYPOINT ["/app/cert2jks", "-config", "/app/config.yaml", "-daemon"]
