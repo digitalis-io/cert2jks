@@ -24,3 +24,4 @@ go.work.sum
 tests/wildcard*
 tests/ca*
 cert2jks
+.claude
