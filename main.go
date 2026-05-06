@@ -148,8 +148,8 @@ func getJKS(jksPath string, jksPassword []byte) (keystore.KeyStore, error) {
 	if err != nil {
 		return ks, err
 	}
-	defer jksFile.Close()
-	err = ks.Store(jksFile, []byte(jksPassword))
+	defer func() { _ = jksFile.Close() }()
+	err = ks.Store(jksFile, jksPassword)
 	if err != nil {
 		return ks, err
 	}
@@ -236,18 +236,20 @@ func addKeyToJKS(name string, certPEM []byte, keyPEM []byte, caPEM []byte, jksPa
 	}
 
 	// Add the certificate chain and private key to the keystore
-	ks.SetPrivateKeyEntry(name, keystore.PrivateKeyEntry{
+	if err := ks.SetPrivateKeyEntry(name, keystore.PrivateKeyEntry{
 		PrivateKey:       keyBlock.Bytes,
 		CertificateChain: certChain,
 		CreationTime:     time.Now(),
-	}, []byte(jksPassword))
+	}, []byte(jksPassword)); err != nil {
+		return fmt.Errorf("set private key entry: %w", err)
+	}
 
 	writeKeyStore(ks, jksPath, []byte(jksPassword))
 	return nil
 }
 
 // hasCertChanged checks if the certificate or key are different from the ones in the keystore
-func hasCertChanged(name string, certPEM []byte, keyPEM []byte, caPEM []byte, jksPath string, jksPassword string) bool {
+func hasCertChanged(name string, certPEM []byte, keyPEM []byte, _ []byte, jksPath string, jksPassword string) bool {
 	if _, err := os.Stat(jksPath); err != nil {
 		if os.IsNotExist(err) {
 			return true
