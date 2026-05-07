@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/subtle"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"flag"
@@ -50,6 +51,7 @@ type Config struct {
 	KeystorePass secret `yaml:"KeystorePassword"`
 	Certs        []Cert `yaml:"Certs"`
 	OnUpdate     string `yaml:"OnUpdate,omitempty"`
+	Encoding     string `yaml:"Encoding,omitempty"`
 }
 
 func readConfigFile(configFile string) (map[string]any, error) {
@@ -64,8 +66,17 @@ func readConfigFile(configFile string) (map[string]any, error) {
 	return result, nil
 }
 
+func base64DecodeConfig(s string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return "", fmt.Errorf("base64 decode: %w", err)
+	}
+	return string(decoded), nil
+}
+
 func getFromVals(cfg map[string]any) (Config, error) {
 	var renderedConfig Config
+
 	runtime, err := vals.New(vals.Options{CacheSize: 300})
 	if err != nil {
 		return renderedConfig, err
@@ -76,6 +87,31 @@ func getFromVals(cfg map[string]any) (Config, error) {
 		return renderedConfig, err
 	}
 
+	// Process Certs before marshalling
+	certsRaw, ok := valsRendered["Certs"]
+	if ok {
+		certs, ok := certsRaw.([]interface{})
+		if !ok {
+			return renderedConfig, fmt.Errorf("Certs is not a slice")
+		}
+
+		for _, certRaw := range certs {
+			cert, ok := certRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			if crtStr, ok := cert["Cert"].(string); ok {
+				decoded, err := base64DecodeConfig(crtStr)
+				if err != nil {
+					fmt.Printf("Could not decode %s cert as base64\n", cert["Name"])
+				} else {
+					cert["Cert"] = decoded
+				}
+			}
+		}
+	}
+
 	renderedYaml, err := yaml.Marshal(valsRendered)
 	if err != nil {
 		return renderedConfig, err
@@ -84,6 +120,7 @@ func getFromVals(cfg map[string]any) (Config, error) {
 	if err := yaml.Unmarshal(renderedYaml, &renderedConfig); err != nil {
 		return renderedConfig, err
 	}
+
 	return renderedConfig, nil
 }
 
@@ -150,9 +187,14 @@ func getJKS(jksPath string, jksPassword []byte) (keystore.KeyStore, error) {
 	return ks, nil
 }
 
-// loadPEM resolves a PEM source. Inline PEM is detected by the BEGIN marker
-// (after trimming whitespace). Otherwise the value is treated as a file path
-// and read via os.ReadFile. Path values must be valid filesystem paths.
+// loadPEM resolves a PEM source. Resolution order:
+//  1. Empty -> nil.
+//  2. Begins with "-----BEGIN" -> inline PEM.
+//  3. Decodes as base64 to inline PEM (vals secret backends sometimes
+//     return base64-encoded material) -> decoded bytes.
+//  4. Plausible filesystem path (no NUL/newline, <= 4096 bytes) -> read file.
+//
+// Anything else is an explicit error rather than a silent file read.
 func loadPEM(src string) ([]byte, error) {
 	if src == "" {
 		return nil, nil
@@ -161,14 +203,46 @@ func loadPEM(src string) ([]byte, error) {
 	if strings.HasPrefix(trimmed, "-----BEGIN") {
 		return []byte(src), nil
 	}
+
+	// Try base64. PEM inside base64 is common when secrets travel through
+	// systems that mangle whitespace (Vault, AWS SM, K8s secrets).
+	if decoded, ok := tryBase64PEM(trimmed); ok {
+		return decoded, nil
+	}
+
 	if strings.ContainsAny(src, "\n\r\x00") {
-		return nil, fmt.Errorf("invalid PEM source: not a valid path and missing BEGIN marker")
+		return nil, errors.New("invalid PEM source: not a valid path and missing BEGIN marker")
 	}
 	if len(src) > 4096 {
-		return nil, fmt.Errorf("invalid PEM source: path too long and missing BEGIN marker")
+		return nil, errors.New("invalid PEM source: payload too long, not a path, and not base64-encoded PEM")
 	}
-	clean := filepath.Clean(src)
-	return os.ReadFile(clean)
+	return os.ReadFile(filepath.Clean(src))
+}
+
+// tryBase64PEM attempts to decode s as base64. Returns the decoded bytes only
+// if the result begins with a PEM "-----BEGIN" marker.
+func tryBase64PEM(s string) ([]byte, bool) {
+	// Strip whitespace inside the candidate.
+	clean := strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '\n', '\r':
+			return -1
+		}
+		return r
+	}, s)
+	if len(clean) < 64 {
+		return nil, false
+	}
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		decoded, err := enc.DecodeString(clean)
+		if err != nil {
+			continue
+		}
+		if bytes.HasPrefix(bytes.TrimSpace(decoded), []byte("-----BEGIN")) {
+			return decoded, true
+		}
+	}
+	return nil, false
 }
 
 func readCertsFromFile(certPath, keyPath, caPath string) ([]byte, []byte, []byte, error) {

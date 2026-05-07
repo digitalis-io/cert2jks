@@ -16,7 +16,7 @@ Certificates can be sourced from any secrets-management backend supported by [he
 
 ## Features
 
-- Reads certificate, key, and CA from files or inline PEM.
+- Reads certificate, key, and CA from files, inline PEM, or base64-encoded PEM (auto-detected).
 - Creates or updates a JKS keystore with the provided credentials.
 - Detects changes in certificates/keys and only updates the keystore when needed.
 - Supports running as a daemon to periodically check for changes.
@@ -51,9 +51,19 @@ Certs:
 | `OnUpdate` | No | Shell command to run after updating the keystore. |
 | `Certs` | Yes | List of certificates to add to the keystore. |
 | `Certs[].Name` | Yes | Alias for the key entry in the keystore. |
-| `Certs[].Cert` | Yes | Path to the certificate file (or inline PEM). |
-| `Certs[].Key` | Yes | Path to the private key file (or inline PEM). |
-| `Certs[].CA` | No | Path to the CA certificate file (or inline PEM). |
+| `Certs[].Cert` | Yes | Certificate source — file path, inline PEM, or base64-encoded PEM. |
+| `Certs[].Key` | Yes | Private key source — file path, inline PEM, or base64-encoded PEM. |
+| `Certs[].CA` | No | CA certificate source — file path, inline PEM, or base64-encoded PEM. May contain multiple PEM blocks. |
+
+### PEM source resolution
+
+Each `Cert` / `Key` / `CA` value is resolved in this order:
+
+1. Begins with `-----BEGIN` → treated as inline PEM.
+2. Decodes as base64 to a value that begins with `-----BEGIN` → decoded and used as PEM. This covers secrets stored base64-encoded in Vault, AWS Secrets Manager, Kubernetes secrets, etc. — no `Encoding` flag or `?decode=base64` URL hint is required.
+3. Otherwise → read as a filesystem path.
+
+Values containing newlines or NUL bytes that are neither inline PEM nor base64 PEM are rejected explicitly rather than mistakenly read as a path.
 
 The whole configuration is parsed through [helmfile/vals](https://github.com/helmfile/vals?tab=readme-ov-file#supported-backends), so any field may reference any supported encrypted backend. The example below combines three different backends — the `KeystorePassword` from [AWS Secrets Manager](https://aws.amazon.com/secrets-manager/), the `OnUpdate` script from [S3](https://aws.amazon.com/s3/), and the certs from [HashiCorp Vault](https://developer.hashicorp.com/vault):
 
