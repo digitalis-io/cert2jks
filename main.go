@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +22,22 @@ import (
 
 var log *logrus.Logger
 
+// secret wraps a sensitive string so it does not leak through fmt/log.
+type secret string
+
+func (s secret) String() string            { return "[REDACTED]" }
+func (s secret) GoString() string          { return "[REDACTED]" }
+func (s secret) MarshalYAML() (any, error) { return string(s), nil }
+func (s *secret) UnmarshalYAML(value *yaml.Node) error {
+	var v string
+	if err := value.Decode(&v); err != nil {
+		return err
+	}
+	*s = secret(v)
+	return nil
+}
+func (s secret) Bytes() []byte { return []byte(s) }
+
 type Cert struct {
 	Name     string `yaml:"Name"`
 	CertPath string `yaml:"Cert"`
@@ -29,359 +47,359 @@ type Cert struct {
 
 type Config struct {
 	KeystorePath string `yaml:"KeystorePath"`
-	KeystorePass string `yaml:"KeystorePassword"`
+	KeystorePass secret `yaml:"KeystorePassword"`
 	Certs        []Cert `yaml:"Certs"`
 	OnUpdate     string `yaml:"OnUpdate,omitempty"`
 }
 
-func readConfigFile(configFile string) (map[string]interface{}, error) {
-	result := make(map[string]interface{})
+func readConfigFile(configFile string) (map[string]any, error) {
+	result := make(map[string]any)
 	configYaml, err := os.ReadFile(configFile)
 	if err != nil {
 		return result, err
 	}
-
-	err = yaml.Unmarshal(configYaml, &result)
-	if err != nil {
+	if err := yaml.Unmarshal(configYaml, &result); err != nil {
 		return result, err
 	}
-	return result, err
+	return result, nil
 }
 
-/*
-KeystorePath: /tmp/keystore.jks
-KeystorePassword: changeit
-OnUpdate: |-
-
-	echo "Keystore updated"
-	systemctl restart my-service
-
-Certs:
-  - Name: key1
-    Cert: tests/wildcard.crt
-    Key: tests/wildcard.key
-    CA: tests/ca.crt
-*/
-func getFromVals(cfg map[string]interface{}) (Config, error) {
+func getFromVals(cfg map[string]any) (Config, error) {
 	var renderedConfig Config
-	runtime, err := vals.New(vals.Options{
-		CacheSize: 300,
-	})
+	runtime, err := vals.New(vals.Options{CacheSize: 300})
 	if err != nil {
 		return renderedConfig, err
 	}
 
-	// Render the configuration using vals
 	valsRendered, err := runtime.Eval(cfg)
 	if err != nil {
 		return renderedConfig, err
 	}
 
-	// Marshal the rendered values back into YAML format
 	renderedYaml, err := yaml.Marshal(valsRendered)
 	if err != nil {
 		return renderedConfig, err
 	}
 
-	// Unmarshal the YAML back into the Config struct
-	err = yaml.Unmarshal(renderedYaml, &renderedConfig)
-	if err != nil {
+	if err := yaml.Unmarshal(renderedYaml, &renderedConfig); err != nil {
 		return renderedConfig, err
 	}
-
 	return renderedConfig, nil
 }
 
 func readKeyStore(filename string, password []byte) (keystore.KeyStore, error) {
-	var ks keystore.KeyStore
+	ks := keystore.New()
 	f, err := os.Open(filename)
 	if err != nil {
 		return ks, err
 	}
-
 	defer func() {
-		if err := f.Close(); err != nil {
-			log.Fatal(err)
+		if cerr := f.Close(); cerr != nil {
+			log.WithError(cerr).Warn("close keystore file")
 		}
 	}()
 
-	ks = keystore.New()
 	if err := ks.Load(f, password); err != nil {
 		return ks, err
 	}
-
-	return ks, err
-}
-
-func writeKeyStore(ks keystore.KeyStore, filename string, password []byte) {
-	f, err := os.Create(filename)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer func() {
-		if err := f.Close(); err != nil {
-			log.Fatal(err)
-		}
-	}()
-
-	err = ks.Store(f, password)
-	if err != nil {
-		log.Fatal(err) //nolint: gocritic
-	}
-}
-
-func getJKS(jksPath string, jksPassword []byte) (keystore.KeyStore, error) {
-	var ks keystore.KeyStore
-
-	// Check if the keystore file already exists
-	if _, err := os.Stat(jksPath); err == nil {
-		ks, err = readKeyStore(jksPath, jksPassword)
-		return ks, err
-	}
-
-	// Create a new keystore
-	ks = keystore.New()
-
-	// Write the keystore to a file
-	jksFile, err := os.Create(jksPath)
-	if err != nil {
-		return ks, err
-	}
-	defer func() { _ = jksFile.Close() }()
-	err = ks.Store(jksFile, jksPassword)
-	if err != nil {
-		return ks, err
-	}
-
 	return ks, nil
 }
 
-func readCertsFromFile(certPath, keyPath, caPath string) ([]byte, []byte, []byte, error) {
-	var certPEM, keyPEM, caPEM []byte
-	var err error
-	// Read and parse the certificate
-	if strings.Contains(certPath, "-----BEGIN") {
-		certPEM = []byte(certPath)
-	} else {
-		certPEM, err = os.ReadFile(certPath)
-		if err != nil {
-			return certPEM, keyPEM, caPEM, err
-		}
-	}
-	// Read and parse the private key
-	if strings.Contains(keyPath, "-----BEGIN") {
-		keyPEM = []byte(keyPath)
-	} else {
-		keyPEM, err = os.ReadFile(keyPath)
-		if err != nil {
-			return certPEM, keyPEM, caPEM, err
-		}
-	}
-
-	if caPath != "" {
-		if strings.Contains(caPath, "-----BEGIN") {
-			caPEM = []byte(caPath)
-		} else {
-			caPEM, err = os.ReadFile(caPath)
-			if err != nil {
-				return certPEM, keyPEM, caPEM, err
-			}
-		}
-	}
-	return certPEM, keyPEM, caPEM, err
-}
-
-func addKeyToJKS(name string, certPEM []byte, keyPEM []byte, caPEM []byte, jksPath string, jksPassword string) error {
-	var err error
-
-	certBlock, _ := pem.Decode(certPEM)
-	if certBlock == nil || certBlock.Type != "CERTIFICATE" {
-		return errors.New("failed to decode certificate")
-	}
-	cert, err := x509.ParseCertificate(certBlock.Bytes)
+// writeKeyStore writes the keystore atomically with mode 0600.
+func writeKeyStore(ks keystore.KeyStore, filename string, password []byte) error {
+	dir := filepath.Dir(filename)
+	tmp, err := os.CreateTemp(dir, ".jks-*.tmp")
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp keystore: %w", err)
 	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
 
-	keyBlock, _ := pem.Decode(keyPEM)
-	if keyBlock == nil || keyBlock.Type != "PRIVATE KEY" {
-		return errors.New("failed to decode private key")
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp keystore: %w", err)
 	}
-
-	// Read and parse the CA certificate if provided
-	var caCert *x509.Certificate
-	if len(caPEM) > 0 {
-		caBlock, _ := pem.Decode(caPEM)
-		if caBlock == nil || caBlock.Type != "CERTIFICATE" {
-			return errors.New("failed to decode CA certificate")
-		}
-		caCert, err = x509.ParseCertificate(caBlock.Bytes)
-		if err != nil {
-			return err
-		}
+	if err := ks.Store(tmp, password); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("store keystore: %w", err)
 	}
-
-	ks, err := getJKS(jksPath, []byte(jksPassword))
-	if err != nil {
-		return err
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp keystore: %w", err)
 	}
-
-	// Build the certificate chain
-	certChain := []keystore.Certificate{
-		{Type: "X509", Content: cert.Raw},
+	if err := os.Rename(tmpName, filename); err != nil {
+		cleanup()
+		return fmt.Errorf("rename keystore: %w", err)
 	}
-	if caCert != nil {
-		certChain = append(certChain, keystore.Certificate{Type: "X509", Content: caCert.Raw})
-	}
-
-	// Add the certificate chain and private key to the keystore
-	if err := ks.SetPrivateKeyEntry(name, keystore.PrivateKeyEntry{
-		PrivateKey:       keyBlock.Bytes,
-		CertificateChain: certChain,
-		CreationTime:     time.Now(),
-	}, []byte(jksPassword)); err != nil {
-		return fmt.Errorf("set private key entry: %w", err)
-	}
-
-	writeKeyStore(ks, jksPath, []byte(jksPassword))
 	return nil
 }
 
-// hasCertChanged checks if the certificate or key are different from the ones in the keystore
-func hasCertChanged(name string, certPEM []byte, keyPEM []byte, _ []byte, jksPath string, jksPassword string) bool {
-	if _, err := os.Stat(jksPath); err != nil {
-		if os.IsNotExist(err) {
-			return true
-		}
+func getJKS(jksPath string, jksPassword []byte) (keystore.KeyStore, error) {
+	if _, err := os.Stat(jksPath); err == nil {
+		return readKeyStore(jksPath, jksPassword)
+	} else if !os.IsNotExist(err) {
+		return keystore.New(), err
 	}
 
-	ks, err := readKeyStore(jksPath, []byte(jksPassword))
+	ks := keystore.New()
+	if err := writeKeyStore(ks, jksPath, jksPassword); err != nil {
+		return ks, err
+	}
+	return ks, nil
+}
+
+// loadPEM resolves a PEM source. Inline PEM is detected by the BEGIN marker
+// (after trimming whitespace). Otherwise the value is treated as a file path
+// and read via os.ReadFile. Path values must be valid filesystem paths.
+func loadPEM(src string) ([]byte, error) {
+	if src == "" {
+		return nil, nil
+	}
+	trimmed := strings.TrimSpace(src)
+	if strings.HasPrefix(trimmed, "-----BEGIN") {
+		return []byte(src), nil
+	}
+	if strings.ContainsAny(src, "\n\r\x00") {
+		return nil, fmt.Errorf("invalid PEM source: not a valid path and missing BEGIN marker")
+	}
+	if len(src) > 4096 {
+		return nil, fmt.Errorf("invalid PEM source: path too long and missing BEGIN marker")
+	}
+	clean := filepath.Clean(src)
+	return os.ReadFile(clean)
+}
+
+func readCertsFromFile(certPath, keyPath, caPath string) ([]byte, []byte, []byte, error) {
+	certPEM, err := loadPEM(certPath)
 	if err != nil {
-		return true
+		return nil, nil, nil, fmt.Errorf("read cert: %w", err)
 	}
-
-	entry, err := ks.GetPrivateKeyEntry(name, []byte(jksPassword))
+	keyPEM, err := loadPEM(keyPath)
 	if err != nil {
-		if errors.Is(err, keystore.ErrEntryNotFound) {
-			return true
-		}
+		return nil, nil, nil, fmt.Errorf("read key: %w", err)
 	}
-
-	keyBlock, _ := pem.Decode(keyPEM)
-	if keyBlock == nil || keyBlock.Type != "PRIVATE KEY" {
-		return true
-	}
-	if !bytes.Equal(keyBlock.Bytes, entry.PrivateKey) {
-		fmt.Printf("Key changed: %s\n", name)
-		return true
-	}
-
-	certBlock, _ := pem.Decode(certPEM)
-	if certBlock == nil || certBlock.Type != "CERTIFICATE" {
-		return true
-	}
-	certDecoded, err := x509.ParseCertificate(certBlock.Bytes)
+	caPEM, err := loadPEM(caPath)
 	if err != nil {
-		fmt.Printf("Error parsing certificate: %s\n", err)
+		return nil, nil, nil, fmt.Errorf("read ca: %w", err)
+	}
+	return certPEM, keyPEM, caPEM, nil
+}
+
+// isPrivateKeyPEM accepts PKCS#8, PKCS#1 RSA, and SEC1 EC private key blocks.
+func isPrivateKeyPEM(t string) bool {
+	switch t {
+	case "PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY":
 		return true
 	}
-
-	for _, cert := range entry.CertificateChain {
-		if !bytes.Equal(certDecoded.Raw, cert.Content) {
-			return true
-		}
-	}
-
 	return false
 }
 
+// parseChain decodes one leaf cert and any additional CA certs from caPEM.
+func parseChain(certPEM, caPEM []byte) (*x509.Certificate, []*x509.Certificate, error) {
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil || certBlock.Type != "CERTIFICATE" {
+		return nil, nil, errors.New("failed to decode certificate")
+	}
+	leaf, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse certificate: %w", err)
+	}
+
+	var cas []*x509.Certificate
+	rest := caPEM
+	for len(bytes.TrimSpace(rest)) > 0 {
+		var b *pem.Block
+		b, rest = pem.Decode(rest)
+		if b == nil {
+			break
+		}
+		if b.Type != "CERTIFICATE" {
+			continue
+		}
+		c, err := x509.ParseCertificate(b.Bytes)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse CA: %w", err)
+		}
+		cas = append(cas, c)
+	}
+	return leaf, cas, nil
+}
+
+func addKeyToJKS(name string, certPEM, keyPEM, caPEM []byte, jksPath string, jksPassword []byte) error {
+	leaf, cas, err := parseChain(certPEM, caPEM)
+	if err != nil {
+		return err
+	}
+
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil || !isPrivateKeyPEM(keyBlock.Type) {
+		return errors.New("failed to decode private key")
+	}
+
+	ks, err := getJKS(jksPath, jksPassword)
+	if err != nil {
+		return err
+	}
+
+	chain := []keystore.Certificate{{Type: "X509", Content: leaf.Raw}}
+	for _, c := range cas {
+		chain = append(chain, keystore.Certificate{Type: "X509", Content: c.Raw})
+	}
+
+	if err := ks.SetPrivateKeyEntry(name, keystore.PrivateKeyEntry{
+		PrivateKey:       keyBlock.Bytes,
+		CertificateChain: chain,
+		CreationTime:     time.Now(),
+	}, jksPassword); err != nil {
+		return fmt.Errorf("set private key entry: %w", err)
+	}
+
+	return writeKeyStore(ks, jksPath, jksPassword)
+}
+
+// hasCertChanged returns true if the keystore is missing, the entry is missing,
+// or any element of the on-disk chain (leaf + CAs) differs from the input.
+// Private-key bytes are compared in constant time.
+func hasCertChanged(name string, certPEM, keyPEM, caPEM []byte, jksPath string, jksPassword []byte) bool {
+	if _, err := os.Stat(jksPath); err != nil {
+		return true
+	}
+
+	ks, err := readKeyStore(jksPath, jksPassword)
+	if err != nil {
+		return true
+	}
+
+	entry, err := ks.GetPrivateKeyEntry(name, jksPassword)
+	if err != nil {
+		return true
+	}
+
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil || !isPrivateKeyPEM(keyBlock.Type) {
+		return true
+	}
+	if subtle.ConstantTimeCompare(keyBlock.Bytes, entry.PrivateKey) != 1 {
+		return true
+	}
+
+	leaf, cas, err := parseChain(certPEM, caPEM)
+	if err != nil {
+		return true
+	}
+
+	want := [][]byte{leaf.Raw}
+	for _, c := range cas {
+		want = append(want, c.Raw)
+	}
+	if len(want) != len(entry.CertificateChain) {
+		return true
+	}
+	for i, raw := range want {
+		if !bytes.Equal(raw, entry.CertificateChain[i].Content) {
+			return true
+		}
+	}
+	return false
+}
+
+// runOnUpdate runs the configured update command via /bin/sh -c.
+// SECURITY: OnUpdate is executed verbatim; treat the config file and any
+// vals-resolved sources as fully trusted. The command body is never logged.
 func runOnUpdate(command string) (string, error) {
 	if command == "" {
 		return "", nil
 	}
-
-	// FIXME: let the user choose the shell
-	cmd := exec.Command("bash", "-c", command)
+	cmd := exec.Command("/bin/sh", "-c", command)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-
-	err := cmd.Run()
-	if err != nil {
-		return "", err
+	if err := cmd.Run(); err != nil {
+		return out.String(), err
 	}
-
 	return out.String(), nil
 }
 
-// mainProcess is the core function that handles the main logic of the application
-func mainProcess(data map[string]interface{}, confFile *string) {
+// sanitizeLogValue strips CR/LF to prevent log-injection from user-supplied YAML.
+func sanitizeLogValue(s string) string {
+	return strings.NewReplacer("\n", " ", "\r", " ").Replace(s)
+}
+
+func mainProcess(data map[string]any, confFile *string) {
 	cfg, err := getFromVals(data)
 	if err != nil {
 		log.WithError(err).Errorf("Decoding yaml configuration file %s", *confFile)
 		return
 	}
 
+	pw := cfg.KeystorePass.Bytes()
+	defer zero(pw)
+
 	changed := false
 	for _, cert := range cfg.Certs {
+		certName := sanitizeLogValue(cert.Name)
 		certPEM, keyPEM, caPEM, err := readCertsFromFile(cert.CertPath, cert.KeyPath, cert.CaPath)
 		if err != nil {
-			log.WithError(err).WithField("cert", cert.Name).Error("Failed to read certificate files")
+			log.WithError(err).WithField("cert", certName).Error("Failed to read certificate files")
 			continue
 		}
 
-		if !hasCertChanged(cert.Name, certPEM, keyPEM, caPEM, cfg.KeystorePath, cfg.KeystorePass) {
+		if !hasCertChanged(cert.Name, certPEM, keyPEM, caPEM, cfg.KeystorePath, pw) {
 			log.WithFields(logrus.Fields{
-				"cert": cert.Name,
+				"cert": certName,
 				"jks":  cfg.KeystorePath,
-			}).Info("Certificate has not changed, skipping.", cert.Name)
+			}).Info("Certificate has not changed, skipping")
 			continue
 		}
 
-		err = addKeyToJKS(cert.Name, certPEM, keyPEM, caPEM, cfg.KeystorePath, cfg.KeystorePass)
-		if err != nil {
-			log.WithFields(logrus.Fields{
-				"cert": cert.Name,
+		if err := addKeyToJKS(cert.Name, certPEM, keyPEM, caPEM, cfg.KeystorePath, pw); err != nil {
+			log.WithError(err).WithFields(logrus.Fields{
+				"cert": certName,
 				"jks":  cfg.KeystorePath,
-			}).Error("Creating jks file on ", cfg.KeystorePath, err)
+			}).Error("Failed to update keystore")
 			return
 		}
 		changed = true
 	}
-	if changed {
-		log.WithFields(logrus.Fields{
-			"jks": cfg.KeystorePath,
-		}).Info("Keystore updated, running OnUpdate command")
-		out, err := runOnUpdate(cfg.OnUpdate)
-		if err != nil {
-			log.WithError(err).Errorf("Running OnUpdate command %s", cfg.OnUpdate)
-			return
-		}
+
+	if !changed {
+		return
+	}
+
+	log.WithField("jks", cfg.KeystorePath).Info("Keystore updated, running OnUpdate command")
+	out, err := runOnUpdate(cfg.OnUpdate)
+	if err != nil {
+		log.WithError(err).Error("OnUpdate command failed")
+		return
+	}
+	if out != "" {
 		log.Info("OnUpdate command output: ", out)
 	}
 }
 
+// zero clears a byte slice in place to remove sensitive material from memory.
+func zero(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
 func getenvOrDefault(envKey, defaultVal string) string {
-	val := os.Getenv(envKey)
-	if val != "" {
-		return val
+	if v := os.Getenv(envKey); v != "" {
+		return v
 	}
 	return defaultVal
 }
 
-// main is the entry point of the application. It initializes the logger, parses command-line flags for configuration file path,
-// daemon mode, and interval. It reads the configuration file and either runs the main process once or repeatedly as a daemon
-// at the specified interval, logging relevant events and errors throughout the process.
 func main() {
-	// Create a new logger instance (optional, can use the package-level logger)
 	log = logrus.New()
 
 	confFile := flag.String("config", getenvOrDefault("CERT2JKS_CONFIG", "tests/example.yaml"), "Path to the configuration file - env: CERT2JKS_CONFIG")
 	daemonEnabled := flag.Bool("daemon", getenvOrDefault("CERT2JKS_DAEMON", "false") == "true", "Run as a systemd daemon - env: CERT2JKS_DAEMON")
 	daemonInterval := flag.Duration("interval", func() time.Duration {
-		env := os.Getenv("CERT2JKS_INTERVAL")
-		if env != "" {
+		if env := os.Getenv("CERT2JKS_INTERVAL"); env != "" {
 			if d, err := time.ParseDuration(env); err == nil {
 				return d
 			}
@@ -392,15 +410,12 @@ func main() {
 	logLevel := flag.String("log-level", getenvOrDefault("CERT2JKS_LOG_LEVEL", "info"), "Log level (debug, info, warn, error, fatal, panic) - env: CERT2JKS_LOG_LEVEL")
 	flag.Parse()
 
-	// Set the output format (e.g., JSON)
 	if *logFormat == "json" {
 		log.SetFormatter(&logrus.JSONFormatter{})
 	} else {
 		log.SetFormatter(&logrus.TextFormatter{})
 	}
 
-	// Set the log level
-	// Set the log level based on user input
 	level, err := logrus.ParseLevel(*logLevel)
 	if err != nil {
 		log.WithError(err).Errorf("Invalid log level '%s' provided. Defaulting to 'info'.", *logLevel)
@@ -423,18 +438,14 @@ func main() {
 
 	if !*daemonEnabled {
 		mainProcess(data, confFile)
-	} else {
-		log.Info("Running as daemon with an interval of ", *daemonInterval)
-		for {
-			mainProcess(data, confFile)
+		return
+	}
 
-			// Calculate the next check time
-			startTime := time.Now()
-			futureTime := startTime.Add(*daemonInterval)
-			formattedTime := futureTime.Format("02/01/2006 15:04")
-
-			log.Info("The next check will be at ", formattedTime)
-			time.Sleep(*daemonInterval)
-		}
+	log.Info("Running as daemon with an interval of ", *daemonInterval)
+	for {
+		mainProcess(data, confFile)
+		next := time.Now().Add(*daemonInterval).Format("02/01/2006 15:04")
+		log.Info("The next check will be at ", next)
+		time.Sleep(*daemonInterval)
 	}
 }
