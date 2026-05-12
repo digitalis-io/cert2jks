@@ -41,6 +41,36 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+sboms:
+  - id: archive
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.spdx.json"
+
+signs:
+  - id: cosign-blobs
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    artifacts: checksum
+    output: true
+
+docker_signs:
+  - id: cosign-images
+    cmd: cosign
+    args:
+      - sign
+      - --yes
+      - ${artifact}
+    artifacts: all
+    output: true
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 

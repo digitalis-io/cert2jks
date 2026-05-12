@@ -15,6 +15,7 @@ concurrency:
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 jobs:
   goreleaser:
@@ -46,6 +47,12 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
 
       - name: Log into GHCR
         uses: docker/login-action@v3
@@ -79,6 +86,12 @@ jobs:
         with:
           go-version: '1.26.2'
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Build darwin binaries
         env:
           VERSION: ${{ github.ref_name }}
@@ -108,11 +121,35 @@ jobs:
 
           ( cd dist && shasum -a 256 *.tar.gz > darwin_checksums.txt )
 
+      - name: Generate SBOMs (darwin)
+        run: |
+          set -euo pipefail
+          for tarball in dist/cert2jks_*_Darwin_*.tar.gz; do
+            syft "$tarball" -o spdx-json="${tarball}.sbom.spdx.json"
+          done
+
+      - name: Sign darwin artifacts (cosign keyless)
+        env:
+          COSIGN_YES: "true"
+        run: |
+          set -euo pipefail
+          for f in dist/cert2jks_*_Darwin_*.tar.gz dist/cert2jks_*_Darwin_*.tar.gz.sbom.spdx.json; do
+            cosign sign-blob --yes \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.pem" \
+              "${f}"
+          done
+
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${GITHUB_REF_NAME}" \
             dist/cert2jks_*_Darwin_*.tar.gz \
+            dist/cert2jks_*_Darwin_*.tar.gz.sig \
+            dist/cert2jks_*_Darwin_*.tar.gz.pem \
+            dist/cert2jks_*_Darwin_*.tar.gz.sbom.spdx.json \
+            dist/cert2jks_*_Darwin_*.tar.gz.sbom.spdx.json.sig \
+            dist/cert2jks_*_Darwin_*.tar.gz.sbom.spdx.json.pem \
             dist/darwin_checksums.txt \
             --clobber
