@@ -92,7 +92,7 @@ func getFromVals(cfg map[string]any) (Config, error) {
 	if ok {
 		certs, ok := certsRaw.([]interface{})
 		if !ok {
-			return renderedConfig, fmt.Errorf("Certs is not a slice")
+			return renderedConfig, fmt.Errorf("certs is not a slice")
 		}
 
 		for _, certRaw := range certs {
@@ -104,7 +104,7 @@ func getFromVals(cfg map[string]any) (Config, error) {
 			if crtStr, ok := cert["Cert"].(string); ok {
 				decoded, err := base64DecodeConfig(crtStr)
 				if err != nil {
-					fmt.Printf("Could not decode %s cert as base64\n", cert["Name"])
+					fmt.Printf("could not decode %s cert as base64\n", cert["Name"].(string))
 				} else {
 					cert["Cert"] = decoded
 				}
