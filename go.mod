@@ -2,8 +2,6 @@ module github.com/digitalis-io/cert2jks
 
 go 1.27.0
 
-toolchain go1.27.0
-
 require (
 	github.com/helmfile/vals v0.44.5
 	github.com/pavlo-v-chernykh/keystore-go/v4 v4.5.0
