@@ -90,13 +90,13 @@ func getFromVals(cfg map[string]any) (Config, error) {
 	// Process Certs before marshalling
 	certsRaw, ok := valsRendered["Certs"]
 	if ok {
-		certs, ok := certsRaw.([]interface{})
+		certs, ok := certsRaw.([]any)
 		if !ok {
 			return renderedConfig, fmt.Errorf("certs is not a slice")
 		}
 
 		for _, certRaw := range certs {
-			cert, ok := certRaw.(map[string]interface{})
+			cert, ok := certRaw.(map[string]any)
 			if !ok {
 				continue
 			}
