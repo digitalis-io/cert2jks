@@ -10,7 +10,7 @@
 
 # cert2jks
 
-`cert2jks` is a Go utility that reads certificates, private keys, and CA certificates from files (or inline PEM), and generates or updates a Java KeyStore (JKS) file. It supports configuration via YAML, can run as a daemon to periodically check for certificate changes, and can execute a custom command when the keystore is updated.
+`cert2jks` is a Go utility that builds and updates Java KeyStore (JKS) files from PEM certificates, private keys, and CA certificates, read from files or inline PEM. It is configured with YAML, can run as a daemon that periodically checks for certificate changes, and can run a reload command whenever the keystore is updated.
 
 Certificates can be sourced from any secrets-management backend supported by [helmfile/vals](https://github.com/helmfile/vals?tab=readme-ov-file#supported-backends). See examples below.
 
